@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ממיר שיחת וואטסאפ ל-PDF (גרסה משפטית)</title>
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="manifest.json">
+    
+    <!-- JSZip Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    
+    <style>
+        /* === CSS Variables & Reset === */
+        :root { 
+            --bg-body: #efeae2; 
+            --bg-me: #d9fdd3; 
+            --bg-other: #ffffff; 
+            --text-main: #111b21; 
+            --text-time: #667781; 
+            --brand-color: #008069;
+        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-body); margin: 0; padding: 20px; color: var(--text-main); }
+        
+        /* === UI Controls === */
+        .controls-container { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; max-width: 800px; margin-left: auto; margin-right: auto; }
+        .filters { display: flex; flex-wrap: wrap; gap: 15px; align-items: center; margin-bottom: 15px; }
+        button { cursor: pointer; background-color: var(--brand-color); color: white; border: none; border-radius: 5px; padding: 10px 20px; font-weight: bold; font-size: 1.1em; transition: background-color 0.2s; }
+        button:hover { background-color: #016b58; }
+        #loading { display: none; color: var(--brand-color); font-weight: bold; margin-top: 10px; }
+        
+        /* === Chat Layout === */
+        #chat-container { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
+        .message { 
+            max-width: 75%; 
+            padding: 8px 12px; 
+            border-radius: 10px; 
+            position: relative; 
+            line-height: 1.5; 
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1); 
+            word-wrap: break-word; 
+            page-break-inside: avoid; /* מונע חיתוך בועה באמצע עמוד */
+            break-inside: avoid;
+        }
+        .msg-me { align-self: flex-end; background-color: var(--bg-me); border-top-left-radius: 0; }
+        .msg-other { align-self: flex-start; background-color: var(--bg-other); border-top-right-radius: 0; }
+        .sender { font-weight: bold; font-size: 0.85em; margin-bottom: 4px; color: #128c7e; }
+        .time { font-size: 0.7em; color: var(--text-time); display: block; text-align: left; margin-top: 4px; }
+        
+        .msg-text { direction: rtl; unicode-bidi: embed; } /* מבטיח ששמות קבצים באנגלית לא ישבשו את כיוון השורה */
+
+        .media-attachment { 
+            display: block;
+            max-width: 100%; 
+            max-height: 400px; 
+            border-radius: 8px; 
+            margin-top: 8px; 
+            page-break-inside: avoid; /* מונע חיתוך תמונה באמצע עמוד */
+            break-inside: avoid;
+        }
+        
+        #docHeader { display: none; text-align: center; font-size: 1.4em; font-weight: bold; color: var(--text-main); padding-bottom: 10px; margin-bottom: 20px; border-bottom: 2px solid var(--brand-color); }
+
+        /* === Print Rules === */
+        @media print {
+            body { padding: 0; background-color: white; }
+            .controls-container { display: none !important; }
+            #docHeader { display: block !important; }
+            .msg-me, .msg-other { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="controls-container">
+    <h2>ממיר שיחות וואטסאפ ל-PDF (תקינות משפטית)</h2>
+    <p>בחר קובץ ZIP מהמכשיר, או שלח אותו ישירות מתפריט השיתוף של וואטסאפ. המערכת נאמנה ב-100% לקובץ המקור.</p>
+    
+    <input type="file" id="fileInput" accept=".zip">
+    <div id="loading">טוען קבצים ומפענח, אנא המתן...</div>
+    
+    <div id="settings" style="display:none; margin-top: 20px;">
+        <div class="filters">
+            <label>השם שלך:</label><select id="myName" onchange="WhatsAppApp.renderDOM()"></select>
+        </div>
+        <div class="filters">
+            <label>שם נמען (אופציונלי):</label><input type="text" id="otherAlias" oninput="WhatsAppApp.renderDOM()">
+        </div>
+        <div class="filters">
+            <label>טלפון (אופציונלי):</label><input type="text" id="otherPhone" oninput="WhatsAppApp.renderDOM()">
+        </div>
+        <div class="filters">
+            <label>מתאריך:</label><input type="date" id="startDate" onchange="WhatsAppApp.renderDOM()">
+            <label>עד תאריך:</label><input type="date" id="endDate" onchange="WhatsAppApp.renderDOM()">
+            <button onclick="window.print()">🖨️ פתח חלון הדפסה ל-PDF</button>
+        </div>
+    </div>
+</div>
+
+<div id="docHeader"></div>
+<div id="chat-container"></div>
+
+<script>
+    /**
+     * Modular Architecture: WhatsAppApp
+     * Handles state, parsing, and rendering with strict fidelity to the source file.
+     */
+    const WhatsAppApp = {
+        state: {
+            messages: [],
+            mediaUrls: {},
+            originalFileName: "WhatsApp_Chat"
+        },
+
+        init() {
+            document.getElementById('fileInput').addEventListener('change', (e) => this.handleFileUpload(e.target.files[0]));
+            this.checkPWASharedFile();
+        },
+
+        toggleLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+            if(show) document.getElementById('settings').style.display = 'none';
+        },
+
+        escapeHTML(str) {
+            return str.replace(/[&<>'"]/g, tag => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+            }[tag]));
+        },
+
+        // --- PWA: Service Worker & File Share Logic ---
+        async checkPWASharedFile() {
+            if ('serviceWorker' in navigator) {
+                try {
+                    await navigator.serviceWorker.register('sw.js');
+                } catch (err) {
+                    console.error('Service Worker Registration Failed:', err);
+                }
+            }
+
+            if ('caches' in window) {
+                try {
+                    const cache = await caches.open('shared-file-cache');
+                    const response = await cache.match('/shared-file');
+                    
+                    if (response) {
+                        let originalName = "WhatsApp_Chat.zip";
+                        const encodedName = response.headers.get('X-Original-Name');
+                        if (encodedName) {
+                            originalName = decodeURIComponent(encodedName);
+                        }
+                        
+                        const blob = await response.blob();
+                        const file = new File([blob], originalName, { type: "application/zip" });
+                        
+                        await cache.delete('/shared-file');
+                        this.handleFileUpload(file);
+                    }
+                } catch (err) {
+                    console.error('Error fetching shared file:', err);
+                }
+            }
+        },
+
+        // --- Core: File Processing ---
+        async handleFileUpload(file) {
+            if (!file) return;
+
+            this.state.originalFileName = file.name.replace(/\.[^/.]+$/, "");
+            document.title = this.state.originalFileName; // אילוץ שם הקובץ בהדפסה
+            this.toggleLoading(true);
+            
+            try {
+                const zip = await JSZip.loadAsync(file);
+                let textContent = "";
+                this.state.messages = [];
+                this.state.mediaUrls = {};
+
+                const fileNames = Object.keys(zip.files);
+                for (let filename of fileNames) {
+                    const zipEntry = zip.files[filename];
+                    if (zipEntry.dir) continue;
+
+                    if (filename.endsWith('.txt')) {
+                        textContent = await zipEntry.async("string");
+                    } else {
+                        const blob = await zipEntry.async("blob");
+                        const cleanName = filename.split('/').pop(); 
+                        this.state.mediaUrls[cleanName] = URL.createObjectURL(blob);
+                    }
+                }
+
+                if (textContent) {
+                    this.parseWhatsAppText(textContent);
+                } else {
+                    alert("לא נמצא קובץ טקסט בתוך ה-ZIP.");
+                    this.toggleLoading(false);
+                }
+            } catch (err) {
+                console.error(err);
+                alert("אירעה שגיאה בקריאת קובץ ה-ZIP. הקובץ עלול להיות פגום.");
+                this.toggleLoading(false);
+            }
+        },
+
+        // --- Core: Text Parsing ---
+        parseWhatsAppText(text) {
+            // ניקוי תווים בלתי נראים (כמו BOM)
+            const lines = text.replace(/[\uFEFF\r]/g, '').split('\n');
+            let currentMsg = null;
+            
+            // זיהוי שורת הודעה תקנית של וואטסאפ (מותאם לעברית ואנגלית)
+            const regex = /^[\u200E\u200F\s]*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})[,\s]+(\d{1,2}:\d{2}).*?-\s*(.*?):\s+(.*)$/i;
+            
+            lines.forEach(line => {
+                const match = line.match(regex);
+                if (match) {
+                    if (currentMsg) this.state.messages.push(currentMsg);
+                    
+                    let [d, m, y] = match[1].split(/[./-]/).map(Number);
+                    if (y < 100) y += 2000;
+                    let dateObj = (m > 12) ? new Date(y, d-1, m) : new Date(y, m-1, d);
+                    dateObj.setHours(0,0,0,0);
+                    
+                    currentMsg = { 
+                        time: match[1] + ' ' + match[2], 
+                        timestamp: dateObj, 
+                        sender: match[3].trim(), 
+                        text: match[4] 
+                    };
+                } else if (currentMsg) {
+                    // הודעה מרובת שורות - הוספת ירידת שורה במקום ליצור בועה חדשה
+                    currentMsg.text += '\n' + line; 
+                }
+            });
+            if (currentMsg) this.state.messages.push(currentMsg);
+            
+            this.setupUIFilters();
+        },
+
+        // --- UI: Setup Filters ---
+        setupUIFilters() {
+            const validDates = this.state.messages.map(m => m.timestamp).filter(d => !isNaN(d));
+            
+            if (validDates.length > 0) {
+                const formatDate = (d) => d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+                document.getElementById('startDate').value = formatDate(validDates[0]);
+                document.getElementById('endDate').value = formatDate(validDates[validDates.length - 1]);
+            }
+            
+            let names = new Set(this.state.messages.map(m => m.sender));
+            let select = document.getElementById('myName');
+            select.innerHTML = '';
+            names.forEach(n => select.innerHTML += `<option value="${this.escapeHTML(n)}">${this.escapeHTML(n)}</option>`);
+            
+            document.getElementById('settings').style.display = 'block';
+            this.toggleLoading(false);
+            this.renderDOM();
+        },
+
+        // --- Core: DOM Rendering (Strict Fidelity) ---
+        renderDOM() {
+            const chatDiv = document.getElementById('chat-container'); 
+            chatDiv.innerHTML = '';
+            
+            const myName = document.getElementById('myName').value.trim();
+            const alias = document.getElementById('otherAlias').value.trim();
+            const phone = document.getElementById('otherPhone').value.trim();
+            
+            let start = new Date(document.getElementById('startDate').value); start.setHours(0,0,0,0);
+            let end = new Date(document.getElementById('endDate').value); end.setHours(23,59,59,999);
+
+            this.updateDocumentHeader(alias, phone, start, end);
+
+            this.state.messages.forEach(msg => {
+                if (msg.timestamp >= start && msg.timestamp <= end) {
+                    const isMe = (msg.sender === myName);
+                    
+                    // אבטחת הטקסט מפני קוד זדוני - הטקסט נשאר מדויק למקור (לא מוחקים שמות קבצים)
+                    let displayTxt = this.escapeHTML(msg.text);
+                    let mediaHtml = '';
+                    
+                    // חיבור תמונות אם שם הקובץ מופיע בטקסט
+                    for (let fileName in this.state.mediaUrls) {
+                        if (msg.text.includes(fileName)) {
+                            // התמונה תרונדר מיד מתחת לטקסט המקורי של ההודעה (שמכיל את שם הקובץ)
+                            mediaHtml += `<img src="${this.state.mediaUrls[fileName]}" class="media-attachment">`;
+                        }
+                    }
+                    
+                    // המרת ירידות שורה לפורמט HTML כדי שיוצגו כראוי בדפדפן
+                    displayTxt = displayTxt.replace(/\n/g, '<br>');
+                    
+                    const senderName = this.escapeHTML(alias || msg.sender);
+                    
+                    chatDiv.innerHTML += `
+                        <div class="message ${isMe ? 'msg-me' : 'msg-other'}">
+                            ${!isMe ? `<div class="sender">${senderName}</div>` : ''}
+                            ${displayTxt ? `<div class="msg-text">${displayTxt}</div>` : ''}
+                            ${mediaHtml}
+                            <span class="time">${this.escapeHTML(msg.time)}</span>
+                        </div>`;
+                }
+            });
+        },
+
+        updateDocumentHeader(alias, phone, start, end) {
+            let sDate = document.getElementById('startDate').value.split('-').reverse().join('/');
+            let eDate = document.getElementById('endDate').value.split('-').reverse().join('/');
+            let identifier = phone || alias;
+            
+            let headerText = "התכתבות";
+            if (identifier) headerText += " עם " + this.escapeHTML(identifier);
+            headerText += ` מתאריך ${sDate} עד ${eDate}`;
+            
+            document.getElementById('docHeader').innerHTML = headerText;
+        }
+    };
+
+    // Boot the app
+    window.addEventListener('DOMContentLoaded', () => WhatsAppApp.init());
+
+</script>
+</body>
+</html>
