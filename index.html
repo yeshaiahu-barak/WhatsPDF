@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ממיר שיחת וואטסאפ ל-PDF (גרסה משפטית)</title>
+    <title>ממיר שיחות וואטסאפ ל-PDF (גרסה משפטית + כיווץ זיכרון)</title>
     
     <!-- PWA Manifest -->
     <link rel="manifest" href="manifest.json">
@@ -40,23 +40,22 @@
             line-height: 1.5; 
             box-shadow: 0 1px 2px rgba(0,0,0,0.1); 
             word-wrap: break-word; 
-            page-break-inside: avoid; /* מונע חיתוך בועה באמצע עמוד */
+            page-break-inside: avoid;
             break-inside: avoid;
         }
         .msg-me { align-self: flex-end; background-color: var(--bg-me); border-top-left-radius: 0; }
         .msg-other { align-self: flex-start; background-color: var(--bg-other); border-top-right-radius: 0; }
         .sender { font-weight: bold; font-size: 0.85em; margin-bottom: 4px; color: #128c7e; }
         .time { font-size: 0.7em; color: var(--text-time); display: block; text-align: left; margin-top: 4px; }
+        .msg-text { direction: rtl; unicode-bidi: embed; }
         
-        .msg-text { direction: rtl; unicode-bidi: embed; } /* מבטיח ששמות קבצים באנגלית לא ישבשו את כיוון השורה */
-
         .media-attachment { 
             display: block;
             max-width: 100%; 
             max-height: 400px; 
             border-radius: 8px; 
             margin-top: 8px; 
-            page-break-inside: avoid; /* מונע חיתוך תמונה באמצע עמוד */
+            page-break-inside: avoid;
             break-inside: avoid;
         }
         
@@ -74,11 +73,11 @@
 <body>
 
 <div class="controls-container">
-    <h2>ממיר שיחות וואטסאפ ל-PDF (תקינות משפטית)</h2>
-    <p>בחר קובץ ZIP מהמכשיר, או שלח אותו ישירות מתפריט השיתוף של וואטסאפ. המערכת נאמנה ב-100% לקובץ המקור.</p>
+    <h2>ממיר שיחות וואטסאפ ל-PDF (כיווץ זיכרון)</h2>
+    <p>בחר קובץ ZIP מהמכשיר. המערכת תכווץ את התמונות "על האוויר" כדי למנוע קריסת זיכרון בשיחות ארוכות.</p>
     
     <input type="file" id="fileInput" accept=".zip">
-    <div id="loading">טוען קבצים ומפענח, אנא המתן...</div>
+    <div id="loading">טוען קבצים, מכווץ תמונות ומפענח, אנא המתן...</div>
     
     <div id="settings" style="display:none; margin-top: 20px;">
         <div class="filters">
@@ -102,10 +101,6 @@
 <div id="chat-container"></div>
 
 <script>
-    /**
-     * Modular Architecture: WhatsAppApp
-     * Handles state, parsing, and rendering with strict fidelity to the source file.
-     */
     const WhatsAppApp = {
         state: {
             messages: [],
@@ -129,7 +124,41 @@
             }[tag]));
         },
 
-        // --- PWA: Service Worker & File Share Logic ---
+        // פונקציית עזר: כיווץ תמונות בתוך הדפדפן כדי לחסוך RAM
+        compressImage(blob, maxWidth = 800, quality = 0.7) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                const url = URL.createObjectURL(blob);
+                
+                img.onload = () => {
+                    URL.revokeObjectURL(url); // שחרור הכתובת הזמנית
+                    let width = img.width;
+                    let height = img.height;
+
+                    // חישוב יחס פרופורציה להקטנה
+                    if (width > maxWidth) {
+                        height = Math.round((height * maxWidth) / width);
+                        width = maxWidth;
+                    }
+
+                    // ציור על קנבס וירטואלי
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    // המרה חזרה לקובץ בינארי (Blob) בפורמט קל
+                    canvas.toBlob((compressedBlob) => {
+                        resolve(compressedBlob);
+                    }, 'image/jpeg', quality);
+                };
+                
+                img.onerror = (err) => reject(err);
+                img.src = url; // התנעת תהליך הטעינה
+            });
+        },
+
         async checkPWASharedFile() {
             if ('serviceWorker' in navigator) {
                 try {
@@ -163,12 +192,11 @@
             }
         },
 
-        // --- Core: File Processing ---
         async handleFileUpload(file) {
             if (!file) return;
 
             this.state.originalFileName = file.name.replace(/\.[^/.]+$/, "");
-            document.title = this.state.originalFileName; // אילוץ שם הקובץ בהדפסה
+            document.title = this.state.originalFileName; 
             this.toggleLoading(true);
             
             try {
@@ -178,6 +206,7 @@
                 this.state.mediaUrls = {};
 
                 const fileNames = Object.keys(zip.files);
+                
                 for (let filename of fileNames) {
                     const zipEntry = zip.files[filename];
                     if (zipEntry.dir) continue;
@@ -187,7 +216,20 @@
                     } else {
                         const blob = await zipEntry.async("blob");
                         const cleanName = filename.split('/').pop(); 
-                        this.state.mediaUrls[cleanName] = URL.createObjectURL(blob);
+                        
+                        // בדיקה: האם מדובר בתמונה? אם כן - נכווץ אותה
+                        if (cleanName.match(/\.(jpe?g|png|webp)$/i)) {
+                            try {
+                                const compressedBlob = await this.compressImage(blob);
+                                this.state.mediaUrls[cleanName] = URL.createObjectURL(compressedBlob);
+                            } catch (e) {
+                                console.warn("Image compression failed, using original file.", e);
+                                this.state.mediaUrls[cleanName] = URL.createObjectURL(blob);
+                            }
+                        } else {
+                            // קבצים אחרים (כמו וידאו או אודיו) נשמרים כרגיל
+                            this.state.mediaUrls[cleanName] = URL.createObjectURL(blob);
+                        }
                     }
                 }
 
@@ -204,13 +246,10 @@
             }
         },
 
-        // --- Core: Text Parsing ---
         parseWhatsAppText(text) {
-            // ניקוי תווים בלתי נראים (כמו BOM)
             const lines = text.replace(/[\uFEFF\r]/g, '').split('\n');
             let currentMsg = null;
             
-            // זיהוי שורת הודעה תקנית של וואטסאפ (מותאם לעברית ואנגלית)
             const regex = /^[\u200E\u200F\s]*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})[,\s]+(\d{1,2}:\d{2}).*?-\s*(.*?):\s+(.*)$/i;
             
             lines.forEach(line => {
@@ -230,7 +269,6 @@
                         text: match[4] 
                     };
                 } else if (currentMsg) {
-                    // הודעה מרובת שורות - הוספת ירידת שורה במקום ליצור בועה חדשה
                     currentMsg.text += '\n' + line; 
                 }
             });
@@ -239,7 +277,6 @@
             this.setupUIFilters();
         },
 
-        // --- UI: Setup Filters ---
         setupUIFilters() {
             const validDates = this.state.messages.map(m => m.timestamp).filter(d => !isNaN(d));
             
@@ -259,7 +296,6 @@
             this.renderDOM();
         },
 
-        // --- Core: DOM Rendering (Strict Fidelity) ---
         renderDOM() {
             const chatDiv = document.getElementById('chat-container'); 
             chatDiv.innerHTML = '';
@@ -277,21 +313,18 @@
                 if (msg.timestamp >= start && msg.timestamp <= end) {
                     const isMe = (msg.sender === myName);
                     
-                    // אבטחת הטקסט מפני קוד זדוני - הטקסט נשאר מדויק למקור (לא מוחקים שמות קבצים)
                     let displayTxt = this.escapeHTML(msg.text);
                     let mediaHtml = '';
                     
-                    // חיבור תמונות אם שם הקובץ מופיע בטקסט
                     for (let fileName in this.state.mediaUrls) {
                         if (msg.text.includes(fileName)) {
-                            // התמונה תרונדר מיד מתחת לטקסט המקורי של ההודעה (שמכיל את שם הקובץ)
                             mediaHtml += `<img src="${this.state.mediaUrls[fileName]}" class="media-attachment">`;
                         }
                     }
                     
-                    // המרת ירידות שורה לפורמט HTML כדי שיוצגו כראוי בדפדפן
                     displayTxt = displayTxt.replace(/\n/g, '<br>');
-                    
+                    if (displayTxt === '' && mediaHtml === '') return;
+
                     const senderName = this.escapeHTML(alias || msg.sender);
                     
                     chatDiv.innerHTML += `
@@ -318,7 +351,6 @@
         }
     };
 
-    // Boot the app
     window.addEventListener('DOMContentLoaded', () => WhatsAppApp.init());
 
 </script>
