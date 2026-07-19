@@ -3,16 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ממיר שיחות וואטסאפ ל-PDF (ביצועי שיא)</title>
+    <title>ממיר שיחות וואטסאפ ל-PDF (מנוע חכם + מד התקדמות)</title>
     
-    <!-- PWA Manifest -->
     <link rel="manifest" href="manifest.json">
-    
-    <!-- JSZip Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     
     <style>
-        /* === CSS Variables & Reset === */
         :root { 
             --bg-body: #efeae2; 
             --bg-me: #d9fdd3; 
@@ -23,7 +19,6 @@
         }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-body); margin: 0; padding: 20px; color: var(--text-main); }
         
-        /* === UI Controls === */
         .controls-container { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; max-width: 800px; margin-left: auto; margin-right: auto; }
         .filters { display: flex; flex-wrap: wrap; gap: 15px; align-items: center; margin-bottom: 15px; }
         button { cursor: pointer; background-color: var(--brand-color); color: white; border: none; border-radius: 5px; padding: 10px 20px; font-weight: bold; font-size: 1.1em; transition: background-color 0.2s; }
@@ -45,7 +40,6 @@
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         
-        /* === Chat Layout === */
         #chat-container { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
         .message { 
             max-width: 75%; 
@@ -76,7 +70,6 @@
         
         #docHeader { display: none; text-align: center; font-size: 1.4em; font-weight: bold; color: var(--text-main); padding-bottom: 10px; margin-bottom: 20px; border-bottom: 2px solid var(--brand-color); }
 
-        /* === Print Rules === */
         @media print {
             body { padding: 0; background-color: white; }
             .controls-container { display: none !important; }
@@ -93,7 +86,6 @@
     
     <input type="file" id="fileInput" accept=".zip">
     
-    <!-- Loading UI -->
     <div id="loading-container">
         <div class="spinner"></div>
         <div id="loading-text">מתחיל פענוח...</div>
@@ -148,7 +140,7 @@
                 textEl.innerHTML = text;
                 if (dateStr) {
                     dateEl.style.display = 'block';
-                    dateEl.innerHTML = `📅 מעבד הודעות מתאריך: <b style="color: var(--brand-color);">${dateStr}</b>`;
+                    dateEl.innerHTML = `📅 מעבד נתונים... <b style="color: var(--brand-color);">${dateStr}</b>`;
                 } else {
                     dateEl.style.display = 'none';
                 }
@@ -185,13 +177,13 @@
                     ctx.drawImage(img, 0, 0, width, height);
 
                     canvas.toBlob((compressedBlob) => {
-                        resolve(compressedBlob || blob); // במקרה של שגיאה - נחזיר את המקור
+                        resolve(compressedBlob || blob); 
                     }, 'image/jpeg', quality);
                 };
                 
                 img.onerror = () => {
                     URL.revokeObjectURL(url);
-                    resolve(blob); // אם התמונה פגומה - נחזיר את המקור כדי לא לתקוע את הלולאה
+                    resolve(blob); 
                 };
                 
                 img.src = url;
@@ -320,7 +312,7 @@
 
             const filteredMessages = this.state.messages.filter(msg => msg.timestamp >= start && msg.timestamp <= end);
             
-            this.updateLoadingStatus(true, "סורק הודעות ומכין קבצי מדיה...");
+            this.updateLoadingStatus(true, "מכין סריקת קבצים...");
             await new Promise(r => setTimeout(r, 20));
 
             const zipFilesMap = {};
@@ -333,9 +325,12 @@
             const mediaToProcess = [];
             const mediaSet = new Set();
 
-            filteredMessages.forEach(msg => {
+            // פירוק סריקת הטקסט למנות כדי למנוע את קריסת הדפדפן (Page Unresponsive)
+            for (let i = 0; i < filteredMessages.length; i++) {
+                const msg = filteredMessages[i];
                 const tokens = msg.text.split(/[\s\(\)\[\]\{\}]+/);
-                tokens.forEach(token => {
+                
+                for (let token of tokens) {
                     if (zipFilesMap[token] && !mediaSet.has(token)) {
                         mediaSet.add(token);
                         mediaToProcess.push({
@@ -344,8 +339,14 @@
                             dateStr: msg.time.split(' ')[0]
                         });
                     }
-                });
-            });
+                }
+                
+                // נשימה לדפדפן כל 1000 הודעות כדי שהאתר לא יקפא
+                if (i % 1000 === 0) {
+                    this.updateLoadingStatus(true, `סורק הודעות... (${i} מתוך ${filteredMessages.length})`);
+                    await new Promise(r => setTimeout(r, 0));
+                }
+            }
 
             const totalFiles = mediaToProcess.length;
             let processedCount = 0;
@@ -370,15 +371,13 @@
                     this.state.mediaUrls[item.cleanName] = URL.createObjectURL(blob);
                 }
 
-                // שחרור הדפדפן מדי פעם כדי שהספינר יסתובב חלק
                 if (processedCount % 5 === 0) {
                     await new Promise(r => setTimeout(r, 0));
                 }
             }
 
-            // עדכון למשתמש שהרינדור מתחיל (שלב שבו הדפדפן עלול לקפוא לשנייה)
-            this.updateLoadingStatus(true, "מצייר את השיחה על המסך, אנא המתן...", "");
-            await new Promise(r => setTimeout(r, 100)); // פקודה קריטית למניעת קריסה
+            this.updateLoadingStatus(true, "בונה את המסך, זה ייקח מספר שניות...", "");
+            await new Promise(r => setTimeout(r, 100)); 
 
             this.renderDOM(filteredMessages, start, end);
             this.updateLoadingStatus(false);
@@ -394,20 +393,23 @@
             
             this.updateDocumentHeader(alias, phone, start, end);
 
-            // יצירת מערך שיאסוף את כל ההודעות כדי למנוע קריסת זיכרון
             let htmlChunks = [];
 
             filteredMessages.forEach(msg => {
                 const isMe = (msg.sender === myName);
-                
                 let displayTxt = this.escapeHTML(msg.text);
                 let mediaHtml = '';
                 
-                for (let fileName in this.state.mediaUrls) {
-                    if (msg.text.includes(fileName)) {
-                        mediaHtml += `<img src="${this.state.mediaUrls[fileName]}" class="media-attachment">`;
+                // שיפור מהירות הרינדור (O(1) Dictionary Lookup)
+                const tokens = msg.text.split(/[\s\(\)\[\]\{\}]+/);
+                const foundMedia = new Set();
+                
+                tokens.forEach(token => {
+                    if (this.state.mediaUrls[token] && !foundMedia.has(token)) {
+                        foundMedia.add(token);
+                        mediaHtml += `<img src="${this.state.mediaUrls[token]}" class="media-attachment">`;
                     }
-                }
+                });
                 
                 displayTxt = displayTxt.replace(/\n/g, '<br>');
                 if (displayTxt === '' && mediaHtml === '') return;
@@ -424,7 +426,6 @@
                 `);
             });
 
-            // "שפיכת" כל הנתונים למסך בפעולה אחת מהירה
             chatDiv.innerHTML = htmlChunks.join('');
         },
 
