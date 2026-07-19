@@ -3,12 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ממיר שיחות וואטסאפ ל-PDF (מנוע חכם + מד התקדמות)</title>
+    <title>ממיר שיחות וואטסאפ ל-PDF (גרסה סופית ויציבה)</title>
     
     <link rel="manifest" href="manifest.json">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     
     <style>
+        /* === CSS Variables & Reset === */
         :root { 
             --bg-body: #efeae2; 
             --bg-me: #d9fdd3; 
@@ -19,6 +20,7 @@
         }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-body); margin: 0; padding: 20px; color: var(--text-main); }
         
+        /* === UI Controls === */
         .controls-container { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; max-width: 800px; margin-left: auto; margin-right: auto; }
         .filters { display: flex; flex-wrap: wrap; gap: 15px; align-items: center; margin-bottom: 15px; }
         button { cursor: pointer; background-color: var(--brand-color); color: white; border: none; border-radius: 5px; padding: 10px 20px; font-weight: bold; font-size: 1.1em; transition: background-color 0.2s; }
@@ -40,6 +42,7 @@
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         
+        /* === Chat Layout === */
         #chat-container { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
         .message { 
             max-width: 75%; 
@@ -81,8 +84,8 @@
 <body>
 
 <div class="controls-container">
-    <h2>ממיר שיחות וואטסאפ ל-PDF (מנוע חכם)</h2>
-    <p>בחר קובץ ZIP. המערכת תטען קודם את התאריכים, ותעבד רק את התמונות הרלוונטיות לטווח שייבחר.</p>
+    <h2>ממיר שיחות וואטסאפ ל-PDF (מנוע חכם ויציב)</h2>
+    <p>בחר קובץ ZIP. המערכת תטען קודם את התאריכים, ותעבד רק את המדיה הרלוונטית לטווח שייבחר.</p>
     
     <input type="file" id="fileInput" accept=".zip">
     
@@ -140,7 +143,7 @@
                 textEl.innerHTML = text;
                 if (dateStr) {
                     dateEl.style.display = 'block';
-                    dateEl.innerHTML = `📅 מעבד נתונים... <b style="color: var(--brand-color);">${dateStr}</b>`;
+                    dateEl.innerHTML = `📅 תאריך מעובד: <b style="color: var(--brand-color);">${dateStr}</b>`;
                 } else {
                     dateEl.style.display = 'none';
                 }
@@ -153,6 +156,14 @@
             return str.replace(/[&<>'"]/g, tag => ({
                 '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
             }[tag]));
+        },
+
+        // פונקציית חילוץ טוקנים (מילים) מהירה שעוקפת את באג התווים השקופים של וואטסאפ
+        extractTokens(text) {
+            const cleanText = text.replace(/[\u200E\u200F]/g, ''); // הסרת LTR/RTL Marks
+            const words = cleanText.split(/\s+/);
+            // הסרת סוגריים וסימני פיסוק משני צידי המילה בלבד
+            return words.map(w => w.replace(/^[\(\)\[\]\{\}\'\"<>]+|[\(\)\[\]\{\}\'\"<>]+$/g, ''));
         },
 
         compressImage(blob, maxWidth = 800, quality = 0.7) {
@@ -192,34 +203,23 @@
 
         async checkPWASharedFile() {
             if ('serviceWorker' in navigator) {
-                try {
-                    await navigator.serviceWorker.register('sw.js');
-                } catch (err) {
-                    console.error('Service Worker Registration Failed:', err);
-                }
+                try { await navigator.serviceWorker.register('sw.js'); } catch (e) {}
             }
-
             if ('caches' in window) {
                 try {
                     const cache = await caches.open('shared-file-cache');
                     const response = await cache.match('/shared-file');
-                    
                     if (response) {
                         let originalName = "WhatsApp_Chat.zip";
                         const encodedName = response.headers.get('X-Original-Name');
-                        if (encodedName) {
-                            originalName = decodeURIComponent(encodedName);
-                        }
+                        if (encodedName) originalName = decodeURIComponent(encodedName);
                         
                         const blob = await response.blob();
                         const file = new File([blob], originalName, { type: "application/zip" });
-                        
                         await cache.delete('/shared-file');
                         this.handleFileUpload(file);
                     }
-                } catch (err) {
-                    console.error('Error fetching shared file:', err);
-                }
+                } catch (err) { console.error(err); }
             }
         },
 
@@ -237,6 +237,9 @@
                 this.state.rawZip = await JSZip.loadAsync(file);
                 let textContent = "";
                 this.state.messages = [];
+                
+                // מניעת דליפות זיכרון מטעינות קודמות
+                Object.values(this.state.mediaUrls).forEach(url => URL.revokeObjectURL(url));
                 this.state.mediaUrls = {};
 
                 const txtFiles = Object.values(this.state.rawZip.files).filter(f => f.name.endsWith('.txt'));
@@ -250,7 +253,7 @@
                 }
             } catch (err) {
                 console.error(err);
-                alert("אירעה שגיאה בקריאת קובץ ה-ZIP. ייתכן והוא גדול מדי או פגום.");
+                alert("אירעה שגיאה בקריאת קובץ ה-ZIP.");
                 this.updateLoadingStatus(false);
             }
         },
@@ -258,7 +261,6 @@
         parseWhatsAppText(text) {
             const lines = text.replace(/[\uFEFF\r]/g, '').split('\n');
             let currentMsg = null;
-            
             const regex = /^[\u200E\u200F\s]*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})[,\s]+(\d{1,2}:\d{2}).*?-\s*(.*?):\s+(.*)$/i;
             
             lines.forEach(line => {
@@ -288,7 +290,6 @@
 
         setupUIFilters() {
             const validDates = this.state.messages.map(m => m.timestamp).filter(d => !isNaN(d));
-            
             if (validDates.length > 0) {
                 const formatDate = (d) => d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
                 document.getElementById('startDate').value = formatDate(validDates[0]);
@@ -312,7 +313,7 @@
 
             const filteredMessages = this.state.messages.filter(msg => msg.timestamp >= start && msg.timestamp <= end);
             
-            this.updateLoadingStatus(true, "מכין סריקת קבצים...");
+            this.updateLoadingStatus(true, "סורק הודעות לאיתור מדיה...");
             await new Promise(r => setTimeout(r, 20));
 
             const zipFilesMap = {};
@@ -325,13 +326,12 @@
             const mediaToProcess = [];
             const mediaSet = new Set();
 
-            // פירוק סריקת הטקסט למנות כדי למנוע את קריסת הדפדפן (Page Unresponsive)
             for (let i = 0; i < filteredMessages.length; i++) {
                 const msg = filteredMessages[i];
-                const tokens = msg.text.split(/[\s\(\)\[\]\{\}]+/);
+                const tokens = this.extractTokens(msg.text);
                 
                 for (let token of tokens) {
-                    if (zipFilesMap[token] && !mediaSet.has(token)) {
+                    if (token.length > 3 && zipFilesMap[token] && !mediaSet.has(token)) {
                         mediaSet.add(token);
                         mediaToProcess.push({
                             path: zipFilesMap[token],
@@ -341,8 +341,8 @@
                     }
                 }
                 
-                // נשימה לדפדפן כל 1000 הודעות כדי שהאתר לא יקפא
-                if (i % 1000 === 0) {
+                // נשימה לדפדפן כדי למנוע את באג Page Unresponsive
+                if (i % 2000 === 0) {
                     this.updateLoadingStatus(true, `סורק הודעות... (${i} מתוך ${filteredMessages.length})`);
                     await new Promise(r => setTimeout(r, 0));
                 }
@@ -350,17 +350,19 @@
 
             const totalFiles = mediaToProcess.length;
             let processedCount = 0;
+            
+            // איפוס מפת ה-URLs הישנה למניעת דליפות זיכרון
+            Object.values(this.state.mediaUrls).forEach(url => URL.revokeObjectURL(url));
             this.state.mediaUrls = {};
 
-            for (let item of mediaToProcess) {
+            for (let i = 0; i < mediaToProcess.length; i++) {
+                let item = mediaToProcess[i];
                 processedCount++;
-                
-                this.updateLoadingStatus(true, `מחלץ ומכווץ תמונה ${processedCount} מתוך ${totalFiles}...`, item.dateStr);
                 
                 const zipEntry = this.state.rawZip.files[item.path];
                 const blob = await zipEntry.async("blob");
                 
-                if (item.cleanName.match(/\.(jpe?g|png|webp)$/i)) {
+                if (item.cleanName.match(/\.(jpe?g)$/i)) {
                     try {
                         const compressedBlob = await this.compressImage(blob);
                         this.state.mediaUrls[item.cleanName] = URL.createObjectURL(compressedBlob);
@@ -371,13 +373,15 @@
                     this.state.mediaUrls[item.cleanName] = URL.createObjectURL(blob);
                 }
 
-                if (processedCount % 5 === 0) {
+                // עדכון מסך ושחרור דפדפן
+                if (i % 5 === 0 || i === mediaToProcess.length - 1) {
+                    this.updateLoadingStatus(true, `מחלץ ומכווץ קבצי מדיה (${processedCount} מתוך ${totalFiles})...`, item.dateStr);
                     await new Promise(r => setTimeout(r, 0));
                 }
             }
 
-            this.updateLoadingStatus(true, "בונה את המסך, זה ייקח מספר שניות...", "");
-            await new Promise(r => setTimeout(r, 100)); 
+            this.updateLoadingStatus(true, "מצייר את השיחה על המסך...", "");
+            await new Promise(r => setTimeout(r, 50)); 
 
             this.renderDOM(filteredMessages, start, end);
             this.updateLoadingStatus(false);
@@ -400,14 +404,24 @@
                 let displayTxt = this.escapeHTML(msg.text);
                 let mediaHtml = '';
                 
-                // שיפור מהירות הרינדור (O(1) Dictionary Lookup)
-                const tokens = msg.text.split(/[\s\(\)\[\]\{\}]+/);
+                const tokens = this.extractTokens(msg.text);
                 const foundMedia = new Set();
                 
                 tokens.forEach(token => {
                     if (this.state.mediaUrls[token] && !foundMedia.has(token)) {
                         foundMedia.add(token);
-                        mediaHtml += `<img src="${this.state.mediaUrls[token]}" class="media-attachment">`;
+                        const url = this.state.mediaUrls[token];
+                        
+                        // תמיכה בכל סוגי המדיה
+                        if (token.match(/\.(jpe?g|png|webp|gif)$/i)) {
+                            mediaHtml += `<img src="${url}" class="media-attachment">`;
+                        } else if (token.match(/\.(mp4|webm)$/i)) {
+                            mediaHtml += `<video src="${url}" controls class="media-attachment"></video>`;
+                        } else if (token.match(/\.(opus|ogg|mp3|wav|m4a)$/i)) {
+                            mediaHtml += `<audio src="${url}" controls class="media-attachment" style="height:40px; width:100%; margin-top:5px;"></audio>`;
+                        } else {
+                            mediaHtml += `<div style="background:#e9ecef; padding:8px; border-radius:5px; margin-top:5px; font-size: 0.85em;">📎 קובץ מצורף: ${this.escapeHTML(token)}</div>`;
+                        }
                     }
                 });
                 
