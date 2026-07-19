@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ממיר שיחות וואטסאפ ל-PDF (גרסה סופית ויציבה)</title>
+    <title>ממיר שיחות וואטסאפ ל-PDF (מנוע יציב ומדויק)</title>
     
     <link rel="manifest" href="manifest.json">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -84,7 +84,7 @@
 <body>
 
 <div class="controls-container">
-    <h2>ממיר שיחות וואטסאפ ל-PDF (מנוע חכם ויציב)</h2>
+    <h2>ממיר שיחות וואטסאפ ל-PDF (מנוע יציב ומדויק)</h2>
     <p>בחר קובץ ZIP. המערכת תטען קודם את התאריכים, ותעבד רק את המדיה הרלוונטית לטווח שייבחר.</p>
     
     <input type="file" id="fileInput" accept=".zip">
@@ -158,12 +158,11 @@
             }[tag]));
         },
 
-        // פונקציית חילוץ טוקנים (מילים) מהירה שעוקפת את באג התווים השקופים של וואטסאפ
-        extractTokens(text) {
-            const cleanText = text.replace(/[\u200E\u200F]/g, ''); // הסרת LTR/RTL Marks
-            const words = cleanText.split(/\s+/);
-            // הסרת סוגריים וסימני פיסוק משני צידי המילה בלבד
-            return words.map(w => w.replace(/^[\(\)\[\]\{\}\'\"<>]+|[\(\)\[\]\{\}\'\"<>]+$/g, ''));
+        // הפתרון לבאג התווים השקופים: Regex טהור ששואב רק שמות קבצים מדויקים
+        extractFilenames(text) {
+            const regex = /([a-zA-Z0-9_-]+\.(?:jpe?g|png|webp|gif|mp4|webm|opus|ogg|mp3|wav|m4a|pdf|docx?|xlsx?))/gi;
+            const matches = text.match(regex);
+            return matches || [];
         },
 
         compressImage(blob, maxWidth = 800, quality = 0.7) {
@@ -238,7 +237,7 @@
                 let textContent = "";
                 this.state.messages = [];
                 
-                // מניעת דליפות זיכרון מטעינות קודמות
+                // איפוס מפת זיכרון ישנה
                 Object.values(this.state.mediaUrls).forEach(url => URL.revokeObjectURL(url));
                 this.state.mediaUrls = {};
 
@@ -328,20 +327,20 @@
 
             for (let i = 0; i < filteredMessages.length; i++) {
                 const msg = filteredMessages[i];
-                const tokens = this.extractTokens(msg.text);
+                const filenames = this.extractFilenames(msg.text); // שימוש במגנט השמות החדש
                 
-                for (let token of tokens) {
-                    if (token.length > 3 && zipFilesMap[token] && !mediaSet.has(token)) {
-                        mediaSet.add(token);
+                for (let filename of filenames) {
+                    if (zipFilesMap[filename] && !mediaSet.has(filename)) {
+                        mediaSet.add(filename);
                         mediaToProcess.push({
-                            path: zipFilesMap[token],
-                            cleanName: token,
+                            path: zipFilesMap[filename],
+                            cleanName: filename,
                             dateStr: msg.time.split(' ')[0]
                         });
                     }
                 }
                 
-                // נשימה לדפדפן כדי למנוע את באג Page Unresponsive
+                // נשימה לדפדפן כדי למנוע קריסה בשיחות ענק
                 if (i % 2000 === 0) {
                     this.updateLoadingStatus(true, `סורק הודעות... (${i} מתוך ${filteredMessages.length})`);
                     await new Promise(r => setTimeout(r, 0));
@@ -351,7 +350,6 @@
             const totalFiles = mediaToProcess.length;
             let processedCount = 0;
             
-            // איפוס מפת ה-URLs הישנה למניעת דליפות זיכרון
             Object.values(this.state.mediaUrls).forEach(url => URL.revokeObjectURL(url));
             this.state.mediaUrls = {};
 
@@ -373,7 +371,6 @@
                     this.state.mediaUrls[item.cleanName] = URL.createObjectURL(blob);
                 }
 
-                // עדכון מסך ושחרור דפדפן
                 if (i % 5 === 0 || i === mediaToProcess.length - 1) {
                     this.updateLoadingStatus(true, `מחלץ ומכווץ קבצי מדיה (${processedCount} מתוך ${totalFiles})...`, item.dateStr);
                     await new Promise(r => setTimeout(r, 0));
@@ -404,23 +401,23 @@
                 let displayTxt = this.escapeHTML(msg.text);
                 let mediaHtml = '';
                 
-                const tokens = this.extractTokens(msg.text);
+                const filenames = this.extractFilenames(msg.text);
                 const foundMedia = new Set();
                 
-                tokens.forEach(token => {
-                    if (this.state.mediaUrls[token] && !foundMedia.has(token)) {
-                        foundMedia.add(token);
-                        const url = this.state.mediaUrls[token];
+                filenames.forEach(filename => {
+                    if (this.state.mediaUrls[filename] && !foundMedia.has(filename)) {
+                        foundMedia.add(filename);
+                        const url = this.state.mediaUrls[filename];
                         
-                        // תמיכה בכל סוגי המדיה
-                        if (token.match(/\.(jpe?g|png|webp|gif)$/i)) {
+                        // תמיכה חכמה במגוון רחב של קבצים (וידאו ואודיו)
+                        if (filename.match(/\.(jpe?g|png|webp|gif)$/i)) {
                             mediaHtml += `<img src="${url}" class="media-attachment">`;
-                        } else if (token.match(/\.(mp4|webm)$/i)) {
-                            mediaHtml += `<video src="${url}" controls class="media-attachment"></video>`;
-                        } else if (token.match(/\.(opus|ogg|mp3|wav|m4a)$/i)) {
+                        } else if (filename.match(/\.(mp4|webm)$/i)) {
+                            mediaHtml += `<video src="${url}" controls class="media-attachment" style="max-height: 300px;"></video>`;
+                        } else if (filename.match(/\.(opus|ogg|mp3|wav|m4a)$/i)) {
                             mediaHtml += `<audio src="${url}" controls class="media-attachment" style="height:40px; width:100%; margin-top:5px;"></audio>`;
                         } else {
-                            mediaHtml += `<div style="background:#e9ecef; padding:8px; border-radius:5px; margin-top:5px; font-size: 0.85em;">📎 קובץ מצורף: ${this.escapeHTML(token)}</div>`;
+                            mediaHtml += `<div style="background:#e9ecef; padding:8px; border-radius:5px; margin-top:5px; font-size: 0.85em;">📎 קובץ מצורף: ${this.escapeHTML(filename)}</div>`;
                         }
                     }
                 });
