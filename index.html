@@ -3,56 +3,51 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ממיר שיחות וואטסאפ ל-PDF (מנוע יציב ומדויק)</title>
+    <title>ממיר שיחות וואטסאפ ל-PDF (גרסת QA סופית)</title>
     
+    <!-- קישור להגדרות האפליקציה (PWA) -->
     <link rel="manifest" href="manifest.json">
+    <!-- ספריית חילוץ קבצי ZIP -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     
     <style>
-        /* === CSS Variables & Reset === */
+        /* =========================================
+           מודול עיצוב 1: משתנים ואיפוס בסיסי
+           ========================================= */
         :root { 
-            --bg-body: #efeae2; 
-            --bg-me: #d9fdd3; 
-            --bg-other: #ffffff; 
-            --text-main: #111b21; 
-            --text-time: #667781; 
-            --brand-color: #008069;
+            --bg-body: #efeae2;     /* רקע כללי של וואטסאפ */
+            --bg-me: #d9fdd3;       /* רקע הודעות שלי (ירוק) */
+            --bg-other: #ffffff;    /* רקע הודעות צד שני (לבן) */
+            --text-main: #111b21;   /* צבע טקסט ראשי */
+            --text-time: #667781;   /* צבע טקסט תאריך ושעה */
+            --brand-color: #008069; /* ירוק המותג של וואטסאפ */
         }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-body); margin: 0; padding: 20px; color: var(--text-main); }
         
-        /* === UI Controls === */
+        /* =========================================
+           מודול עיצוב 2: ממשק משתמש (שליטה וסינון)
+           ========================================= */
         .controls-container { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; max-width: 800px; margin-left: auto; margin-right: auto; }
         .filters { display: flex; flex-wrap: wrap; gap: 15px; align-items: center; margin-bottom: 15px; }
         button { cursor: pointer; background-color: var(--brand-color); color: white; border: none; border-radius: 5px; padding: 10px 20px; font-weight: bold; font-size: 1.1em; transition: background-color 0.2s; }
         button:hover { background-color: #016b58; }
         
-        /* === Loading UI === */
+        /* =========================================
+           מודול עיצוב 3: חיווי טעינה ומד התקדמות
+           ========================================= */
         #loading-container { display: none; margin-top: 15px; background: #e9ecef; border-radius: 8px; padding: 20px; text-align: center; box-shadow: inset 0 1px 3px rgba(0,0,0,0.05); }
         #loading-text { color: var(--text-main); font-weight: bold; margin-bottom: 8px; font-size: 1.1em; }
         #loading-date { font-size: 1em; color: #667781; margin-top: 5px; }
-        
-        .spinner {
-            margin: 0 auto 15px auto;
-            width: 40px;
-            height: 40px;
-            border: 4px solid rgba(0, 128, 105, 0.2);
-            border-top: 4px solid var(--brand-color);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
+        .spinner { margin: 0 auto 15px auto; width: 40px; height: 40px; border: 4px solid rgba(0, 128, 105, 0.2); border-top: 4px solid var(--brand-color); border-radius: 50%; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         
-        /* === Chat Layout === */
+        /* =========================================
+           מודול עיצוב 4: תצוגת הצ'אט והודעות
+           ========================================= */
         #chat-container { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
         .message { 
-            max-width: 75%; 
-            padding: 8px 12px; 
-            border-radius: 10px; 
-            position: relative; 
-            line-height: 1.5; 
-            box-shadow: 0 1px 2px rgba(0,0,0,0.1); 
-            word-wrap: break-word; 
-            page-break-inside: avoid;
+            max-width: 75%; padding: 8px 12px; border-radius: 10px; position: relative; line-height: 1.5; box-shadow: 0 1px 2px rgba(0,0,0,0.1); word-wrap: break-word; 
+            page-break-inside: avoid; /* מניעת חיתוך בועה באמצע עמוד בהדפסה */
             break-inside: avoid;
         }
         .msg-me { align-self: flex-end; background-color: var(--bg-me); border-top-left-radius: 0; }
@@ -61,30 +56,25 @@
         .time { font-size: 0.7em; color: var(--text-time); display: block; text-align: left; margin-top: 4px; }
         .msg-text { direction: rtl; unicode-bidi: embed; }
         
-        .media-attachment { 
-            display: block;
-            max-width: 100%; 
-            max-height: 400px; 
-            border-radius: 8px; 
-            margin-top: 8px; 
-            page-break-inside: avoid;
-            break-inside: avoid;
-        }
-        
+        /* תצוגת מדיה מותאמת למניעת באגים בהדפסה בכרום */
+        .media-attachment { display: block; max-width: 100%; max-height: 400px; border-radius: 8px; margin-top: 8px; page-break-inside: avoid; break-inside: avoid; }
         #docHeader { display: none; text-align: center; font-size: 1.4em; font-weight: bold; color: var(--text-main); padding-bottom: 10px; margin-bottom: 20px; border-bottom: 2px solid var(--brand-color); }
 
+        /* =========================================
+           מודול עיצוב 5: חוקי הדפסה (PDF)
+           ========================================= */
         @media print {
             body { padding: 0; background-color: white; }
-            .controls-container { display: none !important; }
-            #docHeader { display: block !important; }
-            .msg-me, .msg-other { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+            .controls-container { display: none !important; } /* העלמת כפתורים בהדפסה */
+            #docHeader { display: block !important; } /* הצגת כותרת המסמך */
+            .msg-me, .msg-other { print-color-adjust: exact; -webkit-print-color-adjust: exact; } /* הכרחת המדפסת להדפיס את צבעי הרקע */
         }
     </style>
 </head>
 <body>
 
 <div class="controls-container">
-    <h2>ממיר שיחות וואטסאפ ל-PDF (מנוע יציב ומדויק)</h2>
+    <h2>ממיר שיחות וואטסאפ ל-PDF</h2>
     <p>בחר קובץ ZIP. המערכת תטען קודם את התאריכים, ותעבד רק את המדיה הרלוונטית לטווח שייבחר.</p>
     
     <input type="file" id="fileInput" accept=".zip">
@@ -121,18 +111,30 @@
 
 <script>
     const WhatsAppApp = {
+        
+        // =========================================
+        // מודול 1: ניהול מצב (State Management)
+        // שומר את הנתונים הגלובליים של האפליקציה
+        // =========================================
         state: {
-            rawZip: null,
-            messages: [],
-            mediaUrls: {},
+            rawZip: null,           // אובייקט ה-ZIP המקורי (לשליפת תמונות בשלב מאוחר)
+            messages: [],           // מערך ההודעות המפוענחות (טקסט בלבד)
+            mediaUrls: {},          // מילון המחבר בין שם קובץ לכתובת וירטואלית בדפדפן
             originalFileName: "WhatsApp_Chat"
         },
 
+        // הפעלה ראשונית
         init() {
             document.getElementById('fileInput').addEventListener('change', (e) => this.handleFileUpload(e.target.files[0]));
             this.checkPWASharedFile();
         },
 
+        // =========================================
+        // מודול 2: פונקציות עזר (Utilities)
+        // פונקציות קטנות המשרתות את שאר המערכת
+        // =========================================
+        
+        // ניהול תצוגת חלון הטעינה
         updateLoadingStatus(show, text = "", dateStr = "") {
             const container = document.getElementById('loading-container');
             const textEl = document.getElementById('loading-text');
@@ -152,26 +154,29 @@
             }
         },
 
+        // הגנה מפני הזרקת קוד זדוני (XSS)
         escapeHTML(str) {
             return str.replace(/[&<>'"]/g, tag => ({
                 '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
             }[tag]));
         },
 
-        // הפתרון לבאג התווים השקופים: Regex טהור ששואב רק שמות קבצים מדויקים
+        // "המגנט": שואב שמות קבצים מתוך טקסט נגוע בתווים שקופים
         extractFilenames(text) {
+            // ביטוי רגולרי (Regex) שמזהה רצף אותיות ומספרים המסתיימים בסיומת מוכרת
             const regex = /([a-zA-Z0-9_-]+\.(?:jpe?g|png|webp|gif|mp4|webm|opus|ogg|mp3|wav|m4a|pdf|docx?|xlsx?))/gi;
             const matches = text.match(regex);
             return matches || [];
         },
 
+        // מכווץ תמונות על גבי קנבס וירטואלי למניעת קריסת RAM
         compressImage(blob, maxWidth = 800, quality = 0.7) {
             return new Promise((resolve) => {
                 const img = new Image();
                 const url = URL.createObjectURL(blob);
                 
                 img.onload = () => {
-                    URL.revokeObjectURL(url);
+                    URL.revokeObjectURL(url); // שחרור זיכרון קריטי
                     let width = img.width;
                     let height = img.height;
 
@@ -187,7 +192,7 @@
                     ctx.drawImage(img, 0, 0, width, height);
 
                     canvas.toBlob((compressedBlob) => {
-                        resolve(compressedBlob || blob); 
+                        resolve(compressedBlob || blob); // במקרה של כישלון כיווץ, נחזיר את המקור
                     }, 'image/jpeg', quality);
                 };
                 
@@ -200,6 +205,10 @@
             });
         },
 
+        // =========================================
+        // מודול 3: ניהול קבצים וקלט (File Input & PWA)
+        // קבלת קבצים ממשק השיתוף של הטלפון או מבחירה ידנית
+        // =========================================
         async checkPWASharedFile() {
             if ('serviceWorker' in navigator) {
                 try { await navigator.serviceWorker.register('sw.js'); } catch (e) {}
@@ -222,6 +231,7 @@
             }
         },
 
+        // שלב 1 במערכת: פתיחת ה-ZIP ושליפת הטקסט בלבד
         async handleFileUpload(file) {
             if (!file) return;
 
@@ -237,10 +247,11 @@
                 let textContent = "";
                 this.state.messages = [];
                 
-                // איפוס מפת זיכרון ישנה
+                // ניקוי מפת זיכרון ישנה למניעת דליפות זיכרון בטעינה חוזרת
                 Object.values(this.state.mediaUrls).forEach(url => URL.revokeObjectURL(url));
                 this.state.mediaUrls = {};
 
+                // חיפוש חכם של קובץ הטקסט הראשי
                 const txtFiles = Object.values(this.state.rawZip.files).filter(f => f.name.endsWith('.txt'));
                 
                 if (txtFiles.length > 0) {
@@ -252,14 +263,19 @@
                 }
             } catch (err) {
                 console.error(err);
-                alert("אירעה שגיאה בקריאת קובץ ה-ZIP.");
+                alert("אירעה שגיאה בקריאת קובץ ה-ZIP. ודא שזהו קובץ תקין.");
                 this.updateLoadingStatus(false);
             }
         },
 
+        // =========================================
+        // מודול 4: פענוח וסינון (Parsing & Filtering)
+        // הפיכת הטקסט הגולמי לאובייקטים מובנים
+        // =========================================
         parseWhatsAppText(text) {
             const lines = text.replace(/[\uFEFF\r]/g, '').split('\n');
             let currentMsg = null;
+            // ביטוי רגולרי מותאם לזיהוי תאריכים גם אם הם הפוכים בגלל כיווניות (RTL)
             const regex = /^[\u200E\u200F\s]*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})[,\s]+(\d{1,2}:\d{2}).*?-\s*(.*?):\s+(.*)$/i;
             
             lines.forEach(line => {
@@ -279,6 +295,7 @@
                         text: match[4] 
                     };
                 } else if (currentMsg) {
+                    // חיבור שורות של הודעות ארוכות לאובייקט הקיים
                     currentMsg.text += '\n' + line; 
                 }
             });
@@ -287,6 +304,7 @@
             this.setupUIFilters();
         },
 
+        // אכלוס תפריט הסינון לפי הנתונים שנמצאו
         setupUIFilters() {
             const validDates = this.state.messages.map(m => m.timestamp).filter(d => !isNaN(d));
             if (validDates.length > 0) {
@@ -304,17 +322,23 @@
             this.updateLoadingStatus(false);
         },
 
+        // =========================================
+        // מודול 5: המנוע המרכזי (Core Processor)
+        // שלב 2: סריקה, חילוץ וכיווץ מדיה בהתאם לסינון
+        // =========================================
         async processFilteredChat() {
             if (!this.state.rawZip) return;
 
+            // שליפת תאריכים מהממשק וקביעת גבולות בדיוק של מילישניות
             let start = new Date(document.getElementById('startDate').value); start.setHours(0,0,0,0);
             let end = new Date(document.getElementById('endDate').value); end.setHours(23,59,59,999);
 
             const filteredMessages = this.state.messages.filter(msg => msg.timestamp >= start && msg.timestamp <= end);
             
             this.updateLoadingStatus(true, "סורק הודעות לאיתור מדיה...");
-            await new Promise(r => setTimeout(r, 20));
+            await new Promise(r => setTimeout(r, 20)); // נשימה לתצוגה
 
+            // יצירת מפת קבצים זריזה (Dictionary) מה-ZIP לחיפוש מהיר ב-(O(1))
             const zipFilesMap = {};
             Object.keys(this.state.rawZip.files).forEach(path => {
                 if (!this.state.rawZip.files[path].dir) {
@@ -323,11 +347,12 @@
             });
 
             const mediaToProcess = [];
-            const mediaSet = new Set();
+            const mediaSet = new Set(); // למניעת כפילויות עיבוד של אותו קובץ
 
+            // סריקת ההודעות המסוננות לאיתור שמות קבצים באמצעות ה"מגנט"
             for (let i = 0; i < filteredMessages.length; i++) {
                 const msg = filteredMessages[i];
-                const filenames = this.extractFilenames(msg.text); // שימוש במגנט השמות החדש
+                const filenames = this.extractFilenames(msg.text); 
                 
                 for (let filename of filenames) {
                     if (zipFilesMap[filename] && !mediaSet.has(filename)) {
@@ -340,7 +365,7 @@
                     }
                 }
                 
-                // נשימה לדפדפן כדי למנוע קריסה בשיחות ענק
+                // מניעת באג Page Unresponsive ע"י חלוקת העומס (Yielding)
                 if (i % 2000 === 0) {
                     this.updateLoadingStatus(true, `סורק הודעות... (${i} מתוך ${filteredMessages.length})`);
                     await new Promise(r => setTimeout(r, 0));
@@ -350,9 +375,11 @@
             const totalFiles = mediaToProcess.length;
             let processedCount = 0;
             
+            // ניקוי כתובות קודמות לפני חילוץ חדש
             Object.values(this.state.mediaUrls).forEach(url => URL.revokeObjectURL(url));
             this.state.mediaUrls = {};
 
+            // לולאת חילוץ וכיווץ
             for (let i = 0; i < mediaToProcess.length; i++) {
                 let item = mediaToProcess[i];
                 processedCount++;
@@ -360,6 +387,7 @@
                 const zipEntry = this.state.rawZip.files[item.path];
                 const blob = await zipEntry.async("blob");
                 
+                // כיווץ יתבצע רק על תמונות רגילות
                 if (item.cleanName.match(/\.(jpe?g)$/i)) {
                     try {
                         const compressedBlob = await this.compressImage(blob);
@@ -368,9 +396,11 @@
                         this.state.mediaUrls[item.cleanName] = URL.createObjectURL(blob);
                     }
                 } else {
+                    // קבצי אודיו/וידאו/תמונות חיות יישמרו כמות שהם
                     this.state.mediaUrls[item.cleanName] = URL.createObjectURL(blob);
                 }
 
+                // עדכון התצוגה רק מדי פעם כדי לחסוך עומס גרפי
                 if (i % 5 === 0 || i === mediaToProcess.length - 1) {
                     this.updateLoadingStatus(true, `מחלץ ומכווץ קבצי מדיה (${processedCount} מתוך ${totalFiles})...`, item.dateStr);
                     await new Promise(r => setTimeout(r, 0));
@@ -378,12 +408,16 @@
             }
 
             this.updateLoadingStatus(true, "מצייר את השיחה על המסך...", "");
-            await new Promise(r => setTimeout(r, 50)); 
+            await new Promise(r => setTimeout(r, 50)); // הכנת הדפדפן להזרקת HTML מאסיבית
 
             this.renderDOM(filteredMessages, start, end);
             this.updateLoadingStatus(false);
         },
 
+        // =========================================
+        // מודול 6: מנוע רינדור (Rendering Engine)
+        // יצירת קוד ה-HTML להצגת השיחה וההדפסה
+        // =========================================
         renderDOM(filteredMessages, start, end) {
             const chatDiv = document.getElementById('chat-container'); 
             chatDiv.innerHTML = '';
@@ -394,6 +428,7 @@
             
             this.updateDocumentHeader(alias, phone, start, end);
 
+            // שימוש במערך למניעת כתיבה ישירה ובזבזנית למסך
             let htmlChunks = [];
 
             filteredMessages.forEach(msg => {
@@ -401,15 +436,16 @@
                 let displayTxt = this.escapeHTML(msg.text);
                 let mediaHtml = '';
                 
+                // חיפוש מהיר של מדיה בתוך הטקסט
                 const filenames = this.extractFilenames(msg.text);
-                const foundMedia = new Set();
+                const foundMedia = new Set(); // מניעת שכפול תצוגה של אותו קובץ באותה הודעה
                 
                 filenames.forEach(filename => {
                     if (this.state.mediaUrls[filename] && !foundMedia.has(filename)) {
                         foundMedia.add(filename);
                         const url = this.state.mediaUrls[filename];
                         
-                        // תמיכה חכמה במגוון רחב של קבצים (וידאו ואודיו)
+                        // יצירת תגיות HTML תואמות לסוג המדיה
                         if (filename.match(/\.(jpe?g|png|webp|gif)$/i)) {
                             mediaHtml += `<img src="${url}" class="media-attachment">`;
                         } else if (filename.match(/\.(mp4|webm)$/i)) {
@@ -417,16 +453,20 @@
                         } else if (filename.match(/\.(opus|ogg|mp3|wav|m4a)$/i)) {
                             mediaHtml += `<audio src="${url}" controls class="media-attachment" style="height:40px; width:100%; margin-top:5px;"></audio>`;
                         } else {
+                            // גיבוי לקבצי מסמכים או קבצים לא מוכרים
                             mediaHtml += `<div style="background:#e9ecef; padding:8px; border-radius:5px; margin-top:5px; font-size: 0.85em;">📎 קובץ מצורף: ${this.escapeHTML(filename)}</div>`;
                         }
                     }
                 });
                 
+                // החלפת ירידות שורות לתגיות HTML חוקיות
                 displayTxt = displayTxt.replace(/\n/g, '<br>');
+                // דילוג על הודעות ריקות
                 if (displayTxt === '' && mediaHtml === '') return;
 
                 const senderName = this.escapeHTML(alias || msg.sender);
                 
+                // בניית הבועה
                 htmlChunks.push(`
                     <div class="message ${isMe ? 'msg-me' : 'msg-other'}">
                         ${!isMe ? `<div class="sender">${senderName}</div>` : ''}
@@ -437,9 +477,11 @@
                 `);
             });
 
+            // הזרקת כל הנתונים בבת אחת למסך לביצועים אופטימליים
             chatDiv.innerHTML = htmlChunks.join('');
         },
 
+        // הכנת כותרת עליונה שתופיע רק בהדפסת ה-PDF הסופית
         updateDocumentHeader(alias, phone, start, end) {
             let sDate = document.getElementById('startDate').value.split('-').reverse().join('/');
             let eDate = document.getElementById('endDate').value.split('-').reverse().join('/');
@@ -453,6 +495,7 @@
         }
     };
 
+    // התנעת המערכת לאחר טעינת שלד ה-HTML
     window.addEventListener('DOMContentLoaded', () => WhatsAppApp.init());
 
 </script>
