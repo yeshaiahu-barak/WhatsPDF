@@ -3,16 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ממיר שיחות וואטסאפ ל-PDF (גרסה משפטית + מנוע חכם)</title>
+    <title>ממיר שיחות וואטסאפ ל-PDF (מנוע חכם + מד התקדמות)</title>
     
-    <!-- PWA Manifest -->
     <link rel="manifest" href="manifest.json">
-    
-    <!-- JSZip Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     
     <style>
-        /* === CSS Variables & Reset === */
         :root { 
             --bg-body: #efeae2; 
             --bg-me: #d9fdd3; 
@@ -23,16 +19,27 @@
         }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-body); margin: 0; padding: 20px; color: var(--text-main); }
         
-        /* === UI Controls === */
         .controls-container { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; max-width: 800px; margin-left: auto; margin-right: auto; }
         .filters { display: flex; flex-wrap: wrap; gap: 15px; align-items: center; margin-bottom: 15px; }
         button { cursor: pointer; background-color: var(--brand-color); color: white; border: none; border-radius: 5px; padding: 10px 20px; font-weight: bold; font-size: 1.1em; transition: background-color 0.2s; }
         button:hover { background-color: #016b58; }
         
-        #loading-container { display: none; margin-top: 15px; background: #e9ecef; border-radius: 5px; padding: 15px; text-align: center; }
-        #loading-text { color: var(--brand-color); font-weight: bold; margin-bottom: 10px; }
+        /* === Loading UI === */
+        #loading-container { display: none; margin-top: 15px; background: #e9ecef; border-radius: 8px; padding: 20px; text-align: center; box-shadow: inset 0 1px 3px rgba(0,0,0,0.05); }
+        #loading-text { color: var(--text-main); font-weight: bold; margin-bottom: 8px; font-size: 1.1em; }
+        #loading-date { font-size: 1em; color: #667781; margin-top: 5px; }
         
-        /* === Chat Layout === */
+        .spinner {
+            margin: 0 auto 15px auto;
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(0, 128, 105, 0.2);
+            border-top: 4px solid var(--brand-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
         #chat-container { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
         .message { 
             max-width: 75%; 
@@ -63,7 +70,6 @@
         
         #docHeader { display: none; text-align: center; font-size: 1.4em; font-weight: bold; color: var(--text-main); padding-bottom: 10px; margin-bottom: 20px; border-bottom: 2px solid var(--brand-color); }
 
-        /* === Print Rules === */
         @media print {
             body { padding: 0; background-color: white; }
             .controls-container { display: none !important; }
@@ -75,13 +81,15 @@
 <body>
 
 <div class="controls-container">
-    <h2>ממיר שיחות וואטסאפ ל-PDF (מנוע עיבוד חכם)</h2>
+    <h2>ממיר שיחות וואטסאפ ל-PDF (מנוע חכם)</h2>
     <p>בחר קובץ ZIP. המערכת תטען קודם את התאריכים, ותעבד רק את התמונות הרלוונטיות לטווח שייבחר.</p>
     
     <input type="file" id="fileInput" accept=".zip">
     
     <div id="loading-container">
-        <div id="loading-text">טוען נתונים, אנא המתן...</div>
+        <div class="spinner"></div>
+        <div id="loading-text">מתחיל פענוח...</div>
+        <div id="loading-date"></div>
     </div>
     
     <div id="settings" style="display:none; margin-top: 20px;">
@@ -111,7 +119,7 @@
 <script>
     const WhatsAppApp = {
         state: {
-            rawZip: null, // שומר את קובץ ה-ZIP המקורי לעיבוד מאוחר
+            rawZip: null,
             messages: [],
             mediaUrls: {},
             originalFileName: "WhatsApp_Chat"
@@ -122,12 +130,20 @@
             this.checkPWASharedFile();
         },
 
-        updateLoadingStatus(show, text = "") {
+        updateLoadingStatus(show, text = "", dateStr = "") {
             const container = document.getElementById('loading-container');
             const textEl = document.getElementById('loading-text');
+            const dateEl = document.getElementById('loading-date');
+            
             if (show) {
                 container.style.display = 'block';
-                textEl.innerText = text;
+                textEl.innerHTML = text;
+                if (dateStr) {
+                    dateEl.style.display = 'block';
+                    dateEl.innerHTML = `📅 מעבד הודעות מתאריך: <b style="color: var(--brand-color);">${dateStr}</b>`;
+                } else {
+                    dateEl.style.display = 'none';
+                }
             } else {
                 container.style.display = 'none';
             }
@@ -203,7 +219,6 @@
             }
         },
 
-        // שלב 1: פתיחת ה-ZIP ושליפת הטקסט בלבד
         async handleFileUpload(file) {
             if (!file) return;
 
@@ -215,13 +230,11 @@
             document.getElementById('chat-container').innerHTML = '';
             
             try {
-                // שומרים את ה-ZIP בזיכרון המערכת לשלב הבא
                 this.state.rawZip = await JSZip.loadAsync(file);
                 let textContent = "";
                 this.state.messages = [];
                 this.state.mediaUrls = {};
 
-                // חיפוש קובץ הטקסט בלבד
                 const txtFiles = Object.values(this.state.rawZip.files).filter(f => f.name.endsWith('.txt'));
                 
                 if (txtFiles.length > 0) {
@@ -287,56 +300,70 @@
             this.updateLoadingStatus(false);
         },
 
-        // שלב 2: עיבוד תמונות ספציפיות לתאריך בלבד (מונע קריסה)
         async processFilteredChat() {
             if (!this.state.rawZip) return;
 
             let start = new Date(document.getElementById('startDate').value); start.setHours(0,0,0,0);
             let end = new Date(document.getElementById('endDate').value); end.setHours(23,59,59,999);
 
-            // 1. סינון ההודעות לפי תאריך
             const filteredMessages = this.state.messages.filter(msg => msg.timestamp >= start && msg.timestamp <= end);
             
-            // 2. איסוף שמות הקבצים שבאמת מופיעים בהודעות המסוננות
-            const neededMediaNames = new Set();
-            const allZipFiles = Object.keys(this.state.rawZip.files);
+            this.updateLoadingStatus(true, "סורק הודעות ומכין קבצי מדיה...");
             
+            // מתן נשימה לדפדפן כדי שה-UI יתעדכן לפני העיבוד הכבד
+            await new Promise(r => setTimeout(r, 20));
+
+            // יצירת מפת קבצים זריזה לאיתור מהיר
+            const zipFilesMap = {};
+            Object.keys(this.state.rawZip.files).forEach(path => {
+                if (!this.state.rawZip.files[path].dir) {
+                    zipFilesMap[path.split('/').pop()] = path;
+                }
+            });
+
+            const mediaToProcess = [];
+            const mediaSet = new Set();
+
+            // פירוק מהיר (Tokenizer) של הטקסט למילים לאיתור קבצים מקושרים לתאריך
             filteredMessages.forEach(msg => {
-                allZipFiles.forEach(filename => {
-                    const cleanName = filename.split('/').pop();
-                    if (msg.text.includes(cleanName)) {
-                        neededMediaNames.add(filename); // שומר את השם המלא עם הנתיב מה-ZIP
+                const tokens = msg.text.split(/[\s\(\)\[\]\{\}]+/);
+                tokens.forEach(token => {
+                    if (zipFilesMap[token] && !mediaSet.has(token)) {
+                        mediaSet.add(token);
+                        mediaToProcess.push({
+                            path: zipFilesMap[token],
+                            cleanName: token,
+                            dateStr: msg.time.split(' ')[0] // משיכת התאריך ישירות מההודעה
+                        });
                     }
                 });
             });
 
-            const totalFiles = neededMediaNames.size;
+            const totalFiles = mediaToProcess.length;
             let processedCount = 0;
+            this.state.mediaUrls = {};
 
-            this.updateLoadingStatus(true, `מתחיל לעבד ${totalFiles} קבצי מדיה לתקופה שנבחרה...`);
-            this.state.mediaUrls = {}; // איפוס תמונות קודמות
-
-            // 3. חילוץ וכיווץ רק של הקבצים הדרושים
-            for (let filename of neededMediaNames) {
+            // לולאת כיווץ התמונות ועדכון התאריכים במד ההתקדמות
+            for (let item of mediaToProcess) {
                 processedCount++;
-                this.updateLoadingStatus(true, `מחלץ ומכווץ תמונה ${processedCount} מתוך ${totalFiles}...`);
                 
-                const zipEntry = this.state.rawZip.files[filename];
-                const cleanName = filename.split('/').pop();
+                this.updateLoadingStatus(true, `מחלץ ומכווץ תמונה ${processedCount} מתוך ${totalFiles}...`, item.dateStr);
+                
+                const zipEntry = this.state.rawZip.files[item.path];
                 const blob = await zipEntry.async("blob");
                 
-                if (cleanName.match(/\.(jpe?g|png|webp)$/i)) {
+                if (item.cleanName.match(/\.(jpe?g|png|webp)$/i)) {
                     try {
                         const compressedBlob = await this.compressImage(blob);
-                        this.state.mediaUrls[cleanName] = URL.createObjectURL(compressedBlob);
+                        this.state.mediaUrls[item.cleanName] = URL.createObjectURL(compressedBlob);
                     } catch (e) {
-                        this.state.mediaUrls[cleanName] = URL.createObjectURL(blob);
+                        this.state.mediaUrls[item.cleanName] = URL.createObjectURL(blob);
                     }
                 } else {
-                    this.state.mediaUrls[cleanName] = URL.createObjectURL(blob);
+                    this.state.mediaUrls[item.cleanName] = URL.createObjectURL(blob);
                 }
 
-                // הפקודה הקריטית: נותן לדפדפן זמן "לנשום" כדי למנוע קריסה (Main Thread Unblocking)
+                // שחרור Main Thread למניעת קריסת הדפדפן (כמו שחווית בטלפון)
                 await new Promise(r => setTimeout(r, 5));
             }
 
@@ -344,7 +371,6 @@
             this.renderDOM(filteredMessages, start, end);
         },
 
-        // שלב 3: ציור המסך
         renderDOM(filteredMessages, start, end) {
             const chatDiv = document.getElementById('chat-container'); 
             chatDiv.innerHTML = '';
